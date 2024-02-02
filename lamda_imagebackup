@@ -1,0 +1,53 @@
+import boto3
+
+def lambda_handler(event, context):
+    instance_id = 'i-0c5418fda950e383b'
+    client = boto3.client('ec2')
+
+    response = client.create_image(
+        InstanceId=instance_id,
+        Name=f'backup-{instance_id}-{context.aws_request_id}',
+        NoReboot=True
+    )
+
+    print(f'AMI {response["ImageId"]} created for instance {instance_id}')
+
+
+=================================================================================================
+
+import boto3
+import datetime
+
+def lambda_handler(event, context):
+    # Set your EC2 instance ID here
+    instance_id = 'i-0c5418fda950e383b'
+    retention_days = 1  # Number of days to retain backups
+
+    # Create a timestamp for the image name
+    timestamp = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+
+    # Create a new AMI
+    ec2_client = boto3.client('ec2')
+    response = ec2_client.create_image(
+        InstanceId=instance_id,
+        Name=f'backup_{instance_id}_{timestamp}',
+        NoReboot=True
+    )
+
+    new_ami_id = response['ImageId']
+    print(f'Created new AMI: {new_ami_id}')
+
+    # Delete old AMIs and associated snapshots
+    images = ec2_client.describe_images(Filters=[{'Name': 'tag:Name', 'Values': ['backup_*']}])['Images']
+
+    for image in images:
+        image_age = datetime.datetime.now() - image['CreationDate'].replace(tzinfo=None)
+
+        if image_age.days > retention_days:
+            print(f'Deleting old AMI: {image["ImageId"]}')
+            ec2_client.deregister_image(ImageId=image['ImageId'])
+            for block_device in image['BlockDeviceMappings']:
+                snapshot_id = block_device['Ebs']['SnapshotId']
+                print(f'Deleting associated snapshot: {snapshot_id}')
+                ec2_client.delete_snapshot(SnapshotId=snapshot_id)
+
